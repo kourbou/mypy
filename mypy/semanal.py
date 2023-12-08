@@ -2835,6 +2835,7 @@ class SemanticAnalyzer(
             res = AnyType(TypeOfAny.from_error)
         else:
             res = make_any_non_explicit(res)
+        s.rvalue = res
 
         # Aliases defined within functions can't be accessed outside
         # the function, since the symbol table will no longer
