@@ -1192,7 +1192,8 @@ class ASTConverter:
             bound = TypeConverter(self.errors, line=line).visit(n.bound)
         else:
             bound = None
-        return TypeVarNode(n.name, TypeVarLikeKind.TYPEVAR, bound)
+        node = TypeVarNode(n.name, TypeVarLikeKind.TYPEVAR, bound)
+        return self.set_line(node, n)
 
     def visit_ParamSpec(self, n: ast_ParamSpec) -> TypeVarNode:
         return TypeVarNode(n.name, TypeVarLikeKind.PARAMSPEC)
