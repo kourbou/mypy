@@ -2821,16 +2821,50 @@ class SemanticAnalyzer(
         return True
 
     def visit_type_var_node(self, s: TypeVarNode) -> None:
-        pass  # TODO
+        values: list[Type] = []
+        upper_bound: Type = self.object_type()
+        default: Type = AnyType(TypeOfAny.from_omitted_generics)
+        variance = INVARIANT
+
+        if s.bound is not None:
+            if isinstance(s.bound, TupleType):
+                s.bound = s.bound.copy_modified(
+                    items=[self.anal_type(typ) for typ in s.bound.items]
+                )
+                values = s.bound.items
+            else:
+                s.bound = self.anal_type(s.bound)
+                upper_bound = s.bound
+
+        type_var = TypeVarExpr(
+            s.name, self.qualified_name(s.name), values, upper_bound, default, variance
+        )
+
+        self.add_symbol(s.name, type_var, self.statement)
 
     def visit_type_alias_stmt(self, s: TypeAliasStmt) -> None:
         self.statement = s
+
+        for type_param in s.type_params:
+            type_param.accept(self)
+
         res = s.rvalue
+        alias_tvars: list[TypeVarLikeType] = []
+
         if res is None:
             res = AnyType(TypeOfAny.from_error)
         else:
-            res = self.anal_type(res)
-            check_for_explicit_any(res, self.options, self.is_typeshed_stub_file, self.msg, context=s)
+            namespace = self.qualified_name(s.name)
+            found_type_vars = res.accept(TypeVarLikeQuery(self, self.tvar_scope))
+
+            with self.tvar_scope_frame(self.tvar_scope.class_frame(namespace)):
+                for name, tvar_expr in found_type_vars:
+                    alias_tvars.append(self.tvar_scope.bind_new(name, tvar_expr))
+
+                res = self.anal_type(res, tvar_scope=self.tvar_scope)
+            check_for_explicit_any(
+                res, self.options, self.is_typeshed_stub_file, self.msg, context=s
+            )
         if res is None:
             res = AnyType(TypeOfAny.from_error)
         else:
@@ -2846,8 +2880,8 @@ class SemanticAnalyzer(
             self.qualified_name(s.name),
             s.line,
             s.column,
-            alias_tvars=s.type_params,
-            no_args=not s.type_params,
+            alias_tvars=alias_tvars,
+            no_args=not alias_tvars,
             eager=eager,
         )
         self.add_symbol(s.name, alias_node, s)
