@@ -2871,6 +2871,14 @@ class SemanticAnalyzer(
             res = make_any_non_explicit(res)
         s.rvalue = res
 
+        empty_tuple_index = res.empty_tuple_index if isinstance(res, UnboundType) else False
+        no_args = (
+            isinstance(res, ProperType)
+            and isinstance(res, Instance)
+            and not res.args
+            and not empty_tuple_index
+        )
+
         # Aliases defined within functions can't be accessed outside
         # the function, since the symbol table will no longer
         # exist. Work around by expanding them eagerly when used.
@@ -2881,9 +2889,10 @@ class SemanticAnalyzer(
             s.line,
             s.column,
             alias_tvars=alias_tvars,
-            no_args=not alias_tvars,
+            no_args=no_args,
             eager=eager,
         )
+        # TODO: Consider using `check_and_set_up_type_alias` with fake `AssignmentStmt`
         self.add_symbol(s.name, alias_node, s)
 
     def visit_assignment_stmt(self, s: AssignmentStmt) -> None:
