@@ -2821,55 +2821,106 @@ class SemanticAnalyzer(
         return True
 
     def visit_type_var_node(self, s: TypeVarNode) -> None:
+        # NOTE(Kouroche): Create a new type parameter in the current scope by adding a
+        # `TypeVarExpr` to the active symbol table. These type parameters are declared
+        # in PEP 695 generic classes, functions and type statements. They may have an
+        # upper bound or be constrained to two or more types.
+        # NOTE: This function should be very close to `process_typevar_declaration`.
+        # TODO: Add support for generic functions and classes by visiting.
+
         values: list[Type] = []
         upper_bound: Type = self.object_type()
-        default: Type = AnyType(TypeOfAny.from_omitted_generics)
-        variance = INVARIANT
 
-        if s.bound is not None:
+        existing = self.lookup_current_scope(s.name)
+        if existing:
+            return
+
+        if s.bound:
+            allow_tuple_literal = isinstance(s.bound, TupleType)
+            analyzed = self.anal_type(s.bound, allow_tuple_literal=allow_tuple_literal)
+            # Bound is not ready yet, defer.
+            if analyzed is None or has_placeholder(analyzed):
+                return
+            s.bound = analyzed
+
             if isinstance(s.bound, TupleType):
-                s.bound = s.bound.copy_modified(
-                    items=[self.anal_type(typ) for typ in s.bound.items]
-                )
                 values = s.bound.items
+
+                # mypyc suppresses making copies of a function to check each
+                # possible type, so set the upper bound to Any to prevent that
+                # from causing errors.
+                if self.options.mypyc:
+                    upper_bound = AnyType(TypeOfAny.implementation_artifact)
             else:
-                s.bound = self.anal_type(s.bound)
                 upper_bound = s.bound
+
+        default = AnyType(TypeOfAny.from_omitted_generics)  # PEP 696 ?
+
+        for typ in values + [upper_bound, default]:
+            check_for_explicit_any(
+                typ, self.options, self.is_typeshed_stub_file, self.msg, context=s
+            )
+
+        variance = INVARIANT  # TODO: Infer variance.
 
         type_var = TypeVarExpr(
             s.name, self.qualified_name(s.name), values, upper_bound, default, variance
         )
-
-        self.add_symbol(s.name, type_var, self.statement)
+        type_var.set_line(s)
+        self.add_symbol(s.name, type_var, s)
 
     def visit_type_alias_stmt(self, s: TypeAliasStmt) -> None:
+        # NOTE(Kouroche): Create a new PEP 695 type alias in the current scope:
+        #    (1) Enter a new local scope to scope any declared type parameters.
+        #    (2) Visit the `TypeVarNode(s)` in `s.type_params` to create the
+        #        type parameters in the local scope.
+        #    (3) Analyze the `rvalue`, if it is not ready yet defer.
+        # NOTE: This function should be very close to `check_and_set_up_type_alias`.
         self.statement = s
 
-        for type_param in s.type_params:
-            type_param.accept(self)
+        # Namespace of the type variable scope.
+        namespace = self.qualified_name(s.name)
 
-        res = s.rvalue
+        # Type variables bound by the alias.
         alias_tvars: list[TypeVarLikeType] = []
 
-        if res is None:
-            res = AnyType(TypeOfAny.from_error)
-        else:
-            namespace = self.qualified_name(s.name)
+        res: Type | None = s.rvalue
+        with self.enter(s):  # TODO: Check if we should `enter_class` instead.
+            # Create type variables in the type alias scope.
+            for type_param in s.type_params:
+                type_param.accept(self)
+
+            # Query the rvalue for any type variables.
             found_type_vars = res.accept(TypeVarLikeQuery(self, self.tvar_scope))
 
+            # Bind the type variables from l.h.s to the r.h.s.
             with self.tvar_scope_frame(self.tvar_scope.class_frame(namespace)):
-                for name, tvar_expr in found_type_vars:
-                    alias_tvars.append(self.tvar_scope.bind_new(name, tvar_expr))
+                for tvar_name, tvar_expr in found_type_vars:
+                    if self.lookup_current_scope(tvar_name) is None:
+                        self.fail(
+                            "Type alias expressions are not allowed to use traditional "
+                            "type variables.",
+                            res,
+                        )
+                        # TODO: Include a note about using the `type Alias[T]` syntax?
+                        return
 
-                res = self.anal_type(res, tvar_scope=self.tvar_scope)
-            check_for_explicit_any(
-                res, self.options, self.is_typeshed_stub_file, self.msg, context=s
-            )
-        if res is None:
-            res = AnyType(TypeOfAny.from_error)
-        else:
-            res = make_any_non_explicit(res)
-        s.rvalue = res
+                    alias_tvars.append(self.tvar_scope.bind_new(tvar_name, tvar_expr))
+
+                # Analyze the rvalue type, i.e. try to bind its type.
+                res = self.anal_type(res, tvar_scope=self.tvar_scope, allow_placeholder=True)
+
+        # Rvalue is not ready, defer.
+        if res is None or isinstance(res, PlaceholderType):
+            self.mark_incomplete(s.name, s, becomes_typeinfo=True)
+            return
+
+        # Check for an explicit `Any` in the rvalue.
+        check_for_explicit_any(
+            res, self.options, self.is_typeshed_stub_file, self.msg, context=res
+        )
+
+        # TODO(Kouroche): Check `disable_invalid_recursive_aliases`.
 
         empty_tuple_index = res.empty_tuple_index if isinstance(res, UnboundType) else False
         no_args = (
@@ -2892,8 +2943,34 @@ class SemanticAnalyzer(
             no_args=no_args,
             eager=eager,
         )
-        # TODO: Consider using `check_and_set_up_type_alias` with fake `AssignmentStmt`
-        self.add_symbol(s.name, alias_node, s)
+
+        existing = self.current_symbol_table().get(s.name)
+
+        if existing:
+            # An alias gets updated.
+            updated = False
+            if isinstance(existing.node, TypeAlias):
+                if existing.node.target != res:
+                    # Copy expansion to the existing alias, this matches how we update base classes
+                    # for a TypeInfo _in place_ if there are nested placeholders.
+                    existing.node.target = res
+                    existing.node.alias_tvars = alias_tvars
+                    existing.node.no_args = no_args
+                    updated = True
+            else:
+                # Otherwise just replace existing placeholder with type alias.
+                existing.node = alias_node
+                updated = True
+            if updated:
+                if self.final_iteration:
+                    self.cannot_resolve_name(s.name, "name", s)
+                else:
+                    # We need to defer so that this change can get propagated to base classes.
+                    self.defer(s, force_progress=True)
+                return
+        else:
+            self.add_symbol(s.name, alias_node, s)
+        s.rvalue = res
 
     def visit_assignment_stmt(self, s: AssignmentStmt) -> None:
         self.statement = s
@@ -6392,7 +6469,7 @@ class SemanticAnalyzer(
 
     @contextmanager
     def enter(
-        self, function: FuncItem | GeneratorExpr | DictionaryComprehension
+        self, function: FuncItem | GeneratorExpr | DictionaryComprehension | TypeAliasStmt
     ) -> Iterator[None]:
         """Enter a function, generator or comprehension scope."""
         names = self.saved_locals.setdefault(function, SymbolTable())
