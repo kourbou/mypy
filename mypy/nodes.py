@@ -1301,9 +1301,9 @@ class TypeAliasStmt(Statement):
 
     name: str
     type_params: list[TypeVarNode]
-    rvalue: mypy.types.Type | None
+    rvalue: mypy.types.Type
 
-    def __init__(self, name: str, type_params: list[TypeVarNode], rvalue: mypy.types.Type | None) -> None:
+    def __init__(self, name: str, type_params: list[TypeVarNode], rvalue: mypy.types.Type) -> None:
         super().__init__()
         self.name = name
         self.type_params = type_params
