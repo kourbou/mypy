@@ -2904,8 +2904,7 @@ class SemanticAnalyzer(
                 for tvar_name, tvar_expr in found_type_vars:
                     if self.lookup_current_scope(tvar_name) is None:
                         self.fail(
-                            "Type alias expressions are not allowed to use traditional "
-                            "type variables.",
+                            'Type variable "{}" is not allowed in type alias expressions'.format(tvar_name),
                             res,
                         )
                         # TODO: Include a note about using the `type Alias[T]` syntax?
