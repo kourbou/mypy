@@ -2878,6 +2878,12 @@ class SemanticAnalyzer(
         # NOTE: This function should be very close to `check_and_set_up_type_alias`.
         self.statement = s
 
+        existing = self.current_symbol_table().get(s.name)
+
+        if existing and existing.node.line < s.line:
+            self.name_already_defined(s.name, s, existing.node)
+            return
+
         # Namespace of the type variable scope.
         namespace = self.qualified_name(s.name)
 
@@ -2943,8 +2949,6 @@ class SemanticAnalyzer(
             no_args=no_args,
             eager=eager,
         )
-
-        existing = self.current_symbol_table().get(s.name)
 
         if existing:
             # An alias gets updated.
