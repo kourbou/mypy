@@ -2878,6 +2878,12 @@ class SemanticAnalyzer(
         # NOTE: This function should be very close to `check_and_set_up_type_alias`.
         self.statement = s
 
+        if self.is_func_scope():
+            self.fail(
+                "Type alias expressions are not allowed in function bodies", s
+            )
+            return
+
         existing = self.current_symbol_table().get(s.name)
 
         if existing and existing.node.line < s.line:
