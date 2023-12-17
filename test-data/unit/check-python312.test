@@ -1,21 +1,137 @@
-[case test695TypeAlias]
+[case test695SimpleTypeAlias]
 type MyInt = int
 
 def f(x: MyInt) -> MyInt:
     return reveal_type(x)  # N: Revealed type is "builtins.int"
 
+f(1)
+f('')  # E: Argument 1 to "f" has incompatible type "str"; expected "int"
+
+[case test695UnionTypeAlias]
+type MyUnion = int | str
+
+def f(x: MyUnion) -> MyUnion:
+    return reveal_type(x)  # N: Revealed type is "Union[builtins.int, builtins.str]"
+
+f(1)
+f('')
+f(()) # E: Argument 1 to "f" has incompatible type "Tuple[()]"; expected "Union[int, str]"
+[builtins fixtures/tuple.pyi]
+
+[case test695TupleTypeAlias]
+type MyTuple = tuple[int, str]
+
+def f(x: MyTuple) -> MyTuple:
+    return reveal_type(x)  # N: Revealed type is "Tuple[builtins.int, builtins.str]"
+
+f((1, 'x'))
+f(1) # E: Argument 1 to "f" has incompatible type "int"; expected "Tuple[int, str]"
+[builtins fixtures/tuple.pyi]
+
+[case test695CallableTypeAlias]
+from typing import Callable
+
+type MyCallable = Callable[[int], None]
+
+f: MyCallable
+f(1)
+f('') # E: Argument 1 has incompatible type "str"; expected "int"
+
+[case test695ListTypeAlias]
+type MyList = list[int]
+
+def f(x: MyList) -> MyList:
+    return reveal_type(x)  # N: Revealed type is "builtins.list[builtins.int]"
+
+f([1])
+f(['x']) # E: List item 0 has incompatible type "str"; expected "int"
+[builtins fixtures/list.pyi]
+
+[case test695AnyTypeAlias]
+from typing import Any
+
+type MyAny = Any
+
+def f(x: MyAny) -> MyAny:
+    x.foo()
+    return reveal_type(x)  # N: Revealed type is "Any"
+
+f(1)
+f('x')
+
+[case test695NoReturnTypeAlias]
+from typing import NoReturn
+
+type Never = NoReturn
+a: Never
+
+def f(a: Never): ...
+f(5)  # E: Argument 1 to "f" has incompatible type "int"; expected "NoReturn"
+
+[case test695ImportUnionAlias]
+from _m import MyUnion
+
+def f(x: MyUnion) -> MyUnion:
+    return reveal_type(x)  # N: Revealed type is "Union[builtins.int, builtins.str]"
+
+f(1)
+f('x')
+f(()) # E: Argument 1 to "f" has incompatible type "Tuple[()]"; expected "Union[int, str]"
+
+[file _m.py]
+type MyUnion = int | str
+[builtins fixtures/tuple.pyi]
+
+[case test695ProhibitReassigningAliases]
+type A = float
+
+if int():
+    type A = int  # E: Name "A" already defined on line 1
+
+[case test695ForwardTypeAlias]
+def f(p: 'Alias') -> None:
+    pass
+
+reveal_type(f)  # N: Revealed type is "def (p: builtins.int)"
+type Alias = int
+
+[case test695TypeAliasInBuiltins]
+def f(x: int): pass
+type bytes = int
+f(1)
+
 [case test695GenericTypeAlias]
-type MyList[T] = list[T]  # E: PEP 695 type aliases are not yet supported \
-                          # E: Name "T" is not defined
+type MyList[T] = list[T]
 
-def g(x: MyList[int]) -> MyList[int]:  # E: Variable "__main__.MyList" is not valid as a type \
-                                       # N: See https://mypy.readthedocs.io/en/stable/common_issues.html#variables-vs-type-aliases
-    return reveal_type(x)  # N: Revealed type is "MyList?[builtins.int]"
+def g(x: MyList[int]) -> MyList[int]:
+    return reveal_type(x)  # N: Revealed type is "builtins.list[builtins.int]"
 
-type MyInt2 = int  # type: ignore[valid-type]
+[case test695ForwardTypeAliasGeneric]
+from typing import TypeVar, Tuple
 
-def h(x: MyInt2) -> MyInt2:
-    return reveal_type(x)  # N: Revealed type is "builtins.int"
+def f(p: 'Alias[str]') -> None:
+    pass
+
+reveal_type(f)  # N: Revealed type is "def (p: Tuple[builtins.int, builtins.str])"
+type Alias[T] = Tuple[int, T]
+[builtins fixtures/tuple.pyi]
+
+[case test695ProhibitTraditionalTypeVariableInAliasExpr]
+from typing import TypeVar
+
+T = TypeVar("T")
+type MyList = list[T]  # E: Type variable "T" is not allowed in type alias expressions
+
+[case testRecursiveAliasesErrors1]
+from typing import Type, Callable, Union
+
+def test() -> None:
+    A = Union[A, int]  # E: Cannot resolve name "A" (possible cyclic definition) \
+                       # N: Recursive types are not allowed at function scope
+    B = Callable[[B], int]  # E: Cannot resolve name "B" (possible cyclic definition) \
+                            # N: Recursive types are not allowed at function scope
+    C = Type[C]  # E: Cannot resolve name "C" (possible cyclic definition) \
+                 # N: Recursive types are not allowed at function scope
 
 [case test695Class]
 class MyGen[T]:  # E: PEP 695 generics are not yet supported
