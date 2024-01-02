@@ -166,6 +166,7 @@ from mypy.nodes import (
     TypeInfo,
     TypeVarExpr,
     TypeVarLikeExpr,
+    TypeVarLikeKind,
     TypeVarTupleExpr,
     UnaryExpr,
     Var,
@@ -2828,6 +2829,13 @@ class SemanticAnalyzer(
         # NOTE: This function should be very close to `process_typevar_declaration`.
         # TODO: Add support for generic functions and classes by visiting.
 
+        if s.kind == TypeVarLikeKind.TYPEVARTUPLE:
+            self.fail("PEP 695 variadic type variables are not yet supported", s)
+            return  # TODO
+        if s.kind == TypeVarLikeKind.PARAMSPEC:
+            self.fail("PEP 695 parameter specifications are not yet supported", s)
+            return  # TODO
+
         values: list[Type] = []
         upper_bound: Type = self.object_type()
 
@@ -2897,7 +2905,7 @@ class SemanticAnalyzer(
                 type_param.accept(self)
 
             # Query the rvalue for any type variables.
-            found_type_vars = res.accept(TypeVarLikeQuery(self, self.tvar_scope))
+            found_type_vars = self.find_type_var_likes(res)
 
             # Bind the type variables from l.h.s to the r.h.s.
             with self.tvar_scope_frame(self.tvar_scope.class_frame(namespace)):

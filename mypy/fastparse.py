@@ -1196,10 +1196,12 @@ class ASTConverter:
         return self.set_line(node, n)
 
     def visit_ParamSpec(self, n: ast_ParamSpec) -> TypeVarNode:
-        return TypeVarNode(n.name, TypeVarLikeKind.PARAMSPEC)
+        node = TypeVarNode(n.name, TypeVarLikeKind.PARAMSPEC)
+        return self.set_line(node, n)
 
     def visit_TypeVarTuple(self, n: ast_TypeVarTuple) -> TypeVarNode:
-        return TypeVarNode(n.name, TypeVarLikeKind.TYPEVARTUPLE)
+        node = TypeVarNode(n.name, TypeVarLikeKind.TYPEVARTUPLE)
+        return self.set_line(node, n)
 
     def _visit_type_params(self, n: list[AST]) -> list[TypeVarNode]:
         return [self.visit(p) for p in n]
