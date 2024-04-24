@@ -327,15 +327,8 @@ def parse_type_string(
     string expression "blah" using this function.
     """
     try:
-        _, node = parse_type_comment(expr_string.strip(), line=line, column=column, errors=None)
-        if isinstance(node, UnboundType) and node.original_str_expr is None:
-            node.original_str_expr = expr_string
-            node.original_str_fallback = expr_fallback_name
-            return node
-        elif isinstance(node, UnionType):
-            return node
-        else:
-            return RawExpressionType(expr_string, expr_fallback_name, line, column)
+        _, node = parse_type_comment(f"({expr_string})", line=line, column=column, errors=None)
+        return RawExpressionType(expr_string, expr_fallback_name, line, column, node=node)
     except (SyntaxError, ValueError):
         # Note: the parser will raise a `ValueError` instead of a SyntaxError if
         # the string happens to contain things like \x00.
@@ -617,10 +610,9 @@ class ASTConverter:
                 # Check IfStmt block to determine if function overloads can be merged
                 if_overload_name = self._check_ifstmt_for_overloads(stmt, current_overload_name)
                 if if_overload_name is not None:
-                    (
-                        if_block_with_overload,
-                        if_unknown_truth_value,
-                    ) = self._get_executable_if_block_with_overloads(stmt)
+                    (if_block_with_overload, if_unknown_truth_value) = (
+                        self._get_executable_if_block_with_overloads(stmt)
+                    )
 
             if (
                 current_overload_name is not None
@@ -920,9 +912,11 @@ class ASTConverter:
                         # PEP 484 disallows both type annotations and type comments
                         self.fail(message_registry.DUPLICATE_TYPE_SIGNATURES, lineno, n.col_offset)
                     arg_types = [
-                        a.type_annotation
-                        if a.type_annotation is not None
-                        else AnyType(TypeOfAny.unannotated)
+                        (
+                            a.type_annotation
+                            if a.type_annotation is not None
+                            else AnyType(TypeOfAny.unannotated)
+                        )
                         for a in args
                     ]
                 else:
@@ -1042,6 +1036,8 @@ class ASTConverter:
             return
         # Indicate that type should be wrapped in an Optional if arg is initialized to None.
         optional = isinstance(initializer, NameExpr) and initializer.name == "None"
+        if isinstance(type, RawExpressionType) and type.node is not None:
+            type = type.node
         if isinstance(type, UnboundType):
             type.optional = optional
 
@@ -1817,12 +1813,10 @@ class TypeConverter:
         )
 
     @overload
-    def visit(self, node: ast3.expr) -> ProperType:
-        ...
+    def visit(self, node: ast3.expr) -> ProperType: ...
 
     @overload
-    def visit(self, node: AST | None) -> ProperType | None:
-        ...
+    def visit(self, node: AST | None) -> ProperType | None: ...
 
     def visit(self, node: AST | None) -> ProperType | None:
         """Modified visit -- keep track of the stack of nodes"""

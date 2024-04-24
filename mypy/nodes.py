@@ -1155,7 +1155,7 @@ class ClassDef(Statement):
         }
 
     @classmethod
-    def deserialize(self, data: JsonDict) -> ClassDef:
+    def deserialize(cls, data: JsonDict) -> ClassDef:
         assert data[".class"] == "ClassDef"
         res = ClassDef(
             data["name"],
@@ -1825,6 +1825,7 @@ class RefExpr(Expression):
         "is_inferred_def",
         "is_alias_rvalue",
         "type_guard",
+        "type_is",
     )
 
     def __init__(self) -> None:
@@ -1846,6 +1847,8 @@ class RefExpr(Expression):
         self.is_alias_rvalue = False
         # Cache type guard from callable_type.type_guard
         self.type_guard: mypy.types.Type | None = None
+        # And same for TypeIs
+        self.type_is: mypy.types.Type | None = None
 
     @property
     def fullname(self) -> str:
@@ -3357,13 +3360,13 @@ class TypeInfo(SymbolNode):
             "declared_metaclass": (
                 None if self.declared_metaclass is None else self.declared_metaclass.serialize()
             ),
-            "metaclass_type": None
-            if self.metaclass_type is None
-            else self.metaclass_type.serialize(),
+            "metaclass_type": (
+                None if self.metaclass_type is None else self.metaclass_type.serialize()
+            ),
             "tuple_type": None if self.tuple_type is None else self.tuple_type.serialize(),
-            "typeddict_type": None
-            if self.typeddict_type is None
-            else self.typeddict_type.serialize(),
+            "typeddict_type": (
+                None if self.typeddict_type is None else self.typeddict_type.serialize()
+            ),
             "flags": get_flags(self, TypeInfo.FLAGS),
             "metadata": self.metadata,
             "slots": sorted(self.slots) if self.slots is not None else None,
